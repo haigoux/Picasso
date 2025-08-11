@@ -7,7 +7,6 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-frontend/
 
 /cypress/videos/
 /cypress/screenshots/
@@ -23,7 +22,7 @@ frontend/
 *.sw?
 
 *.tsbuildinfo
-
+old shit
 
 # python ignores
 
