@@ -22,7 +22,7 @@ lerna-debug.log*
 *.sw?
 
 *.tsbuildinfo
-old shit
+
 
 # python ignores
 
