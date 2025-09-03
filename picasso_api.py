@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import time
 
+import numpy as np
+
 # if not "picasso" dir in ~/
 def makeIfNotDir(path):
     if not os.path.exists(path):
@@ -42,6 +44,10 @@ def getNextPicturePath():
     return picture_path
 
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+cap.set(cv2.CAP_PROP_FPS, 30)
 fps = 30 # target fps for output video
 actual_camera_fps = 30  # will be detected from camera
 recording = False
@@ -126,7 +132,25 @@ def stabilize_frame_rate(frame):
             return frame_buffer[-1]  # Return most recent frame
     
     return None
-    
+
+def add_text(frame, position, text, color=(255, 255, 255), scale=2):
+    cv2.putText(frame, text, (position[0] + 2, position[1] + 2), cv2.FONT_HERSHEY_PLAIN, scale, (0, 0, 0), 4)
+    cv2.putText(frame, text, position, cv2.FONT_HERSHEY_PLAIN, scale, color, 2)
+
+def add_recording_dot(frame):
+    # opaque rectangle background
+    # cv2.rectangle(frame, (20, 30), (250, 70), (0, 0, 255), -1)
+    # do a mask instead for the rectangle
+    mask = np.zeros_like(frame)
+    cv2.rectangle(mask, (20, 30), (250, 70), (50, 50, 50), -1)
+    frame = cv2.addWeighted(frame, 1, mask, -4.0, 0)
+
+
+    cv2.circle(frame, (40, 50), 10, (0, 0, 255), -1)
+    # black outline
+    cv2.circle(frame, (40, 50), 10, (0, 0, 0), 2)
+    return frame
+
 async def gen_frames(request: fastapi.Request):
     global video_writer
     while await request.is_disconnected() is False:
@@ -134,18 +158,17 @@ async def gen_frames(request: fastapi.Request):
             print("Failed to open camera")
             break
         ret, frame = cap.read()
+        time.sleep(0.02)
         if not ret:
             break
-            
+        # add text in the top left of the frame
+        add_text(frame, (10, 20), "PREVIEW", scale=1)
+        if recording:
+            frame = add_recording_dot(frame)
+            add_text(frame, (10, 60), "   RECORDING", color=(0, 0, 255))
         # For streaming, always show the latest frame
         _, buffer = cv2.imencode('.jpg', frame)
-        
-        # For recording, use frame rate stabilization
-        if recording and video_writer is not None:
-            stabilized_frame = stabilize_frame_rate(frame)
-            if stabilized_frame is not None:
-                video_writer.write(stabilized_frame)
-
+        # resize frame in buffer to 
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
