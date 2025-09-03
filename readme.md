@@ -1,5 +1,9 @@
 # Picasso
 ## Raspberry Pi DVR System
+```
+⚠️ WARNING!!!! ⚠️
+These docs are unfinished and are not guaranteed to work
+```
 What is Picasso?
 Picasso is software that allows a camera operator to use the Raspberry Pi as a DVR/Capture Card for USB video devices such as capture cards, webcams, camcorders etc. It can be very useful for tapeless cameras as it was originally designed for.
 
