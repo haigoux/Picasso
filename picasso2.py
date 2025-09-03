@@ -1,18 +1,23 @@
+from datetime import timedelta
 import signal
 import time
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
+# cors
+from fastapi.middleware.cors import CORSMiddleware
 import json
 import os
 import subprocess
 import numpy as np
 import pyvirtualcam
+import datetime
 from termcolor import colored
 from colorama import init
 import sys
 import cv2
 import threading
 import asyncio
+import psutil
 init()
 
 class Logger:
@@ -126,8 +131,19 @@ class CameraInterface:
             "start_time": None,
             "end_time": None,
             "fps": config["fps"],
-            "resolution": config["resolution"]
+            "resolution": config["resolution"],
+            "storage_usage": {
+                "total_bytes": 0,
+                "used_bytes": 0,
+                "free_bytes": 0
+            },
+            "memory_usage": {
+                "total_bytes": 0,
+                "used_bytes": 0,
+                "free_bytes": 0
+            }
         }
+        self._temp_output_path = None
         self._black_frame = np.zeros((int(config["resolution"].split("x")[1]), int(config["resolution"].split("x")[0]), 3), dtype=np.uint8)
         self._frame_buffer = []
         self._cur_frame = None
@@ -172,6 +188,41 @@ class CameraInterface:
         if not os.path.exists(dir_path):
             os.makedirs(dir_path, exist_ok=True)
 
+    def get_metadata(self):
+        mem = psutil.virtual_memory()
+        self.metadata["memory_usage"]["total_bytes"] = mem.total
+        self.metadata["memory_usage"]["used_bytes"] = mem.used
+        self.metadata["memory_usage"]["free_bytes"] = mem.available
+        if config["usb_mode"]:
+            path = config["usb_path"]
+        else:
+            path = os.path.expanduser(config["other_path"])
+        if os.path.exists(path):
+            usage = psutil.disk_usage(path)
+            self.metadata["storage_usage"]["total_bytes"] = usage.total
+            self.metadata["storage_usage"]["used_bytes"] = usage.used
+            self.metadata["storage_usage"]["free_bytes"] = usage.free
+        else:
+            self.metadata["storage_usage"]["total_bytes"] = 0
+            self.metadata["storage_usage"]["used_bytes"] = 0
+            self.metadata["storage_usage"]["free_bytes"] = 0
+        root = self.root
+        self.metadata['root'] = root.rsplit('/', 1)[0]
+        return self.metadata
+    
+
+    def _getTempPath(self):
+        """
+        If using USB mode, picasso will first save to a temp folder on the main drive then save onto the USB drive later
+        This is done to avoid issues with write speeds on some USB drives which
+        could affect video encoding
+        """
+        if not os.path.exists("/tmp/picasso"):
+            os.makedirs("/tmp/picasso", exist_ok=True)
+        rand_name = f"temp_{int(time.time())}.avi"
+        return os.path.join("/tmp/picasso", rand_name)
+    
+
     def getNextVideoPath(self):
         video_dir = os.path.join(self.root, "videos")
         # picasso/videos/MonthFullNameYYYY/dayNumberHHMMSS.avi
@@ -198,26 +249,47 @@ class CameraInterface:
 
     def start_recording(self):
         self.metadata["recording"] = True
-        self.metadata["start_time"] = time.time()
+        # iso
+        now = datetime.datetime.now().isoformat()
+        self.metadata["start_time"] = now
         self.logger.log("Started recording")
         # ffmpeg -f v4l2 -video_size 1280x800 -i /dev/video0 -codec:v h264_omx -b:v 2048k webcam.mkv
+        
+        next_video_path = self.getNextVideoPath()
+        output_path = None
+        if config["usb_mode"]:
+            self._temp_output_path = self._getTempPath()
+            output_path = self._temp_output_path
+        else:
+            output_path = next_video_path
+            self._temp_output_path = None
         proc = subprocess.Popen([
             "ffmpeg",
             "-f", "v4l2",
             "-video_size", config["resolution"],
             "-i", "/dev/video40",
-            "-c:v", "h264_omx",
+            # "-c:v", "h264_omx",
+            "-c:v", config["encoding_format"],
             "-b:v", "2048k",
-            self.getNextVideoPath()
+            output_path
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) # TODO: add to log files l8r m8
         self._ffmpeg_pid = proc.pid
 
     def stop_recording(self):
         self.metadata["recording"] = False
-        self.metadata["end_time"] = time.time()
         self.logger.log("Stopped recording")
         if self._ffmpeg_pid:
             os.kill(self._ffmpeg_pid, signal.SIGTERM)
+        if self._temp_output_path and config["usb_mode"]:
+            # move the temp file to the usb drive
+            next_video_path = self.getNextVideoPath()
+            try:
+                os.rename(self._temp_output_path, next_video_path)
+                self.logger.log(f"Moved recording to {next_video_path}")
+            except Exception as e:
+                self.logger.error(f"Failed to move recording to {next_video_path}: {e}")
+            self._temp_output_path = None
+        
 
     async def recv_frame(self):
         self.logger.log("Starting frame receiver")
@@ -268,7 +340,22 @@ class CameraInterface:
                 continue
             yield (b'--frame\r\n'
                 b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+
+    async def take_picture(self):
+        picture_path = self.getNextPicturePath()
+        frame = self._cur_frame if self._cur_frame is not None else self._black_frame
+        cv2.imwrite(picture_path, frame)
+        self.logger.log(f"Saved picture to {picture_path}")
+        return (picture_path, os.path.getsize(picture_path)) # size in bytes
+
 app = FastAPI(docs_url=None)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 camera = CameraInterface()
 
 def run_camera():
@@ -279,7 +366,21 @@ threading.Thread(target=run_camera, daemon=True).start()
 async def stream(req: Request):
     return StreamingResponse(camera._get_web_stream(req), media_type='multipart/x-mixed-replace; boundary=frame')
 
-@app.post("/capture")
-async def capture():
-    image = camera.capture_image()
-    return JSONResponse(content={"image": image})
+@app.get('/start_recording')
+async def start_recording():
+    camera.start_recording()
+    return JSONResponse(content={"status": "recording started", 'metadata': camera.metadata})
+
+@app.get('/stop_recording')
+async def stop_recording():
+    camera.stop_recording()
+    return JSONResponse(content={"status": "recording stopped", 'metadata': camera.metadata})
+
+@app.get('/take_picture')
+async def take_picture():
+    picture_path, size_bytes = await camera.take_picture()
+    return JSONResponse(content={"status": "success", "path": picture_path, "size_bytes": size_bytes}, status_code=200)
+
+@app.get("/metadata")
+async def get_metadata():
+    return JSONResponse(content={"metadata": camera.get_metadata()})
