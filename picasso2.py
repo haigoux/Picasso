@@ -430,18 +430,39 @@ def run_camera():
 threading.Thread(target=run_camera, daemon=True).start()
 
 # add middleware to check for passcode in header for all routes
+
+#test function to ensure middleware works
 @app.middleware("http")
-async def check_passcode(request: Request, call_next):
+async def test(request: Request, call_next):
+    # bypass /stream
+    if request.url.path == "/stream":
+        response = await call_next(request)
+        return response
+    # bypass options requests
+    if request.method == "OPTIONS":
+        response = await call_next(request)
+        return response
+    header_passcode = request.headers.get("X-Picasso-Passcode")
     if config["secure"]:
+        if header_passcode is None or header_passcode == "":
+            response = JSONResponse(content={"error": "Unauthorized"}, status_code=401)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            return response
         if request.url.path in ["/start_recording", "/stop_recording", "/take_picture"]:
-            passcode = request.headers.get("X-Picasso-Passcode")
-            if passcode != config["passcode"]:
-                return JSONResponse(content={"error": "Unauthorized"}, status_code=401)
+            if header_passcode != config["passcode"]:
+                response = JSONResponse(content={"error": "Unauthorized"}, status_code=401)
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                response.headers["Access-Control-Allow-Headers"] = "*"
+                return response
     response = await call_next(request)
     return response
 
 @app.get("/stream")
-async def stream(req: Request):
+async def stream(req: Request, passcode: str = None):
+    if config["secure"] and passcode != config["passcode"]:
+        return JSONResponse(content={"error": "Unauthorized"}, status_code=401)
+
     return StreamingResponse(camera._get_web_stream(req), media_type='multipart/x-mixed-replace; boundary=frame')
 
 @app.get('/start_recording')
@@ -460,5 +481,5 @@ async def take_picture():
     return JSONResponse(content={"status": "success", "path": picture_path, "size_bytes": size_bytes}, status_code=200)
 
 @app.get("/metadata")
-async def get_metadata():
+async def get_metadata(passcode: str = None):
     return JSONResponse(content={"metadata": camera.get_metadata()})

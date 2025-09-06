@@ -3,6 +3,11 @@
 </script>
 
 <template>
+    <div class="passcode-entry" v-if="!authorized">
+        <label for="passcode">Enter Passcode:</label>
+        <input type="password" id="passcode" v-model="_passcode_input" />
+        <button @click="enterPasscode(_passcode_input)">Submit</button>
+    </div>
     <div class="container">
         <div class="controls">
             <!-- <div class="row">
@@ -73,7 +78,7 @@
                         </span>
                         <div class="progress">
                             <div class="fill" :style="{ width: memory_used_percent + '%' }"></div>
-                        </div> 
+                        </div>
                         <span>
                             {{ memory_used_percent.toFixed(1) }}%
                         </span>
@@ -84,9 +89,10 @@
                         </span>
                         <div class="progress">
                             <div class="fill" :style="{ width: storage_used_percent + '%' }"></div>
-                        </div> 
+                        </div>
                         <span>
-                            {{ storage_used_percent.toFixed(1) }}% of {{ (metadata.storage_usage.total_bytes / (1024 * 1024 * 1024)).toFixed(0) }} GB
+                            {{ storage_used_percent.toFixed(1) }}% of {{ (metadata.storage_usage.total_bytes / (1024 *
+                            1024 * 1024)).toFixed(0) }} GB
                         </span>
                     </div>
                 </div>
@@ -111,13 +117,51 @@ export default {
             picture_taken: false,
             storage_used_percent: 0,
             memory_used_percent: 0,
+            authorized: true,
+            _passcode_input: '',
+            _header_x_picasso_passcode: '', // passcode for secure endpoints
         };
     },
     methods: {
+        enterPasscode(code){
+            // save to cookie
+            this.$cookie.set('picasso_passcode', code, { expires: 7 });
+            this._header_x_picasso_passcode = code;
+            // reload
+            this.getStreamUrl();
+            this.getMetadata();
+        },
+        get(url, callback) {
+            fetch(url, {
+                headers: {
+                    'X-Picasso-Passcode': this._header_x_picasso_passcode
+                }
+            })
+                .then(response => {
+                    if (response.status === 401) {
+                        this.authorized = false;
+                        throw new Error('Unauthorized');
+                    }else if (response.status === 200) {
+                        this.authorized = true;
+                    }
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    callback(data);
+                })
+                .catch(error => {
+                });
+        },
         getStreamUrl() {
             // get the ip address of the server running this website
             const ip = window.location.hostname;
             this.stream_src = `http://${ip}:8000/stream`;
+            if (this._header_x_picasso_passcode) {
+                this.stream_src += `?passcode=${this._header_x_picasso_passcode}`;
+            }
         },
         getDurationString() {
             if (!this.metadata.recording) {
@@ -132,65 +176,58 @@ export default {
             this.recording_length_str = new Date(seconds * 1000).toISOString().substr(11, 8);
         },
         startRecording() {
-            fetch(`http://${window.location.hostname}:8000/start_recording`)
-                .then(response => response.json())
-                .then(data => {
-                    this.metadata = data.metadata;
-                })
-                .catch(error => {
-                    console.error('Error starting recording:', error);
-                });
+            // fetch(`http://${window.location.hostname}:8000/start_recording`, {
+            //     headers: {
+            //         'X-Picasso-Passcode': this._header_x_picasso_passcode
+            //     }
+            // })
+            //     .then(response => response.json())
+            //     .then(data => {
+            //         this.metadata = data.metadata;
+            //     })
+            //     .catch(error => {
+            //         console.error('Error starting recording:', error);
+            //     });
+            this.get(`http://${window.location.hostname}:8000/start_recording`, (data) => {
+                this.metadata = data.metadata;
+            });
         },
         stopRecording() {
-            fetch(`http://${window.location.hostname}:8000/stop_recording`)
-                .then(response => response.json())
-                .then(data => {
-                    this.metadata = data.metadata;
-                })
-                .catch(error => {
-                    console.error('Error stopping recording:', error);
-                });
+            this.get(`http://${window.location.hostname}:8000/stop_recording`, (data) => {
+                this.metadata = data.metadata;
+            });
         },
         takePicture() {
-            fetch(`http://${window.location.hostname}:8000/take_picture`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        this.pic_size_bytes = data.size_bytes;
-                        this.picture_taken = true;
-                        setTimeout(() => {
-                            this.picture_taken = false;
-                        }, 3000); // hide after 3 seconds
-                    }
-                })
-                .catch(error => {
-                    console.error('Error taking picture:', error);
-                });
+            this.get(`http://${window.location.hostname}:8000/take_picture`, (data) => {
+                this.metadata = data.metadata;
+            });
         },
         getMetadata() {
-            fetch(`http://${window.location.hostname}:8000/metadata`)
-                .then(response => response.json())
-                .then(data => {
-                    this.metadata = data.metadata;
-
-                    // calculate storage used percent and memory used percent
-                    if (this.metadata.storage_usage.total_bytes > 0) {
-                        this.storage_used_percent = this.metadata.storage_usage.used_bytes / this.metadata.storage_usage.total_bytes * 100;
-                    } else {
-                        this.storage_used_percent = 0;
-                    }
-                    if (this.metadata.memory_usage.total_bytes > 0) {
-                        this.memory_used_percent = this.metadata.memory_usage.used_bytes / this.metadata.memory_usage.total_bytes * 100;
-                    } else {
-                        this.memory_used_percent = 0;
-                    }
-                })
-                .catch(error => {
-                    console.error('Error getting metadata:', error);
-                });
-        }
+            this.get(`http://${window.location.hostname}:8000/metadata`, (data) => {
+                this.metadata = data;
+                if (this.metadata.storage_usage) {
+                    this.storage_used_percent = (this.metadata.storage_usage.used_bytes / this.metadata.storage_usage.total_bytes) * 100;
+                }
+                if (this.metadata.memory_usage) {
+                    this.memory_used_percent = (this.metadata.memory_usage.used_bytes / this.metadata.memory_usage.total_bytes) * 100;
+                }
+                if (this.metadata.last_picture) {
+                    this.pic_size_bytes = this.metadata.last_picture.size_bytes;
+                    this.picture_taken = true;
+                    setTimeout(() => {
+                        this.picture_taken = false;
+                    }, 3000);
+                }
+            });
+        },
     },
     mounted() {
+        // load passcode from cookie
+        const savedPasscode = this.$cookie.get('picasso_passcode');
+        if (savedPasscode) {
+            this._header_x_picasso_passcode = savedPasscode;
+        }
+
         this.getStreamUrl();
         this.getMetadata();
         setInterval(() => {
@@ -204,6 +241,51 @@ export default {
 </script>
 
 <style lang='scss' scoped>
+.passcode-entry {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    top: 0;
+    bottom: 0;
+    width: 100%;
+    z-index: 10;
+    position: absolute;
+    gap: 8px;
+    background-color: rgba(22, 22, 22, 0.568);
+    backdrop-filter: blur(5px);
+
+
+    label {
+        font-size: 1rem;
+        font-family: monospace;
+        color: white;
+    }
+
+    input {
+        padding: 8px;
+        font-size: 1rem;
+        border-radius: 4px;
+        border: 1px solid #ccc;
+        font-family: monospace;
+    }
+
+    button {
+        padding: 8px 16px;
+        font-size: 1rem;
+        border-radius: 4px;
+        border: none;
+        background-color: rgba(91, 255, 233, 0.692);
+        cursor: pointer;
+        font-family: monospace;
+
+        &:hover {
+            background-color: rgba(91, 255, 233, 0.8);
+        }
+    }
+}
+
 .container {
     display: flex;
     flex-direction: row;
