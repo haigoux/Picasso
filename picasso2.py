@@ -67,16 +67,10 @@ else:
             config = json.load(f)
     except json.JSONDecodeError:
         LOGS.error(f"Config file at {config_path} is not valid JSON")
-        if input("Use default config? (y/n): ").lower() == "y":
-            config = default_config
-        else:
-            sys.exit(1)
+        config = default_config
     except Exception as e:
         LOGS.error(f"Error loading config file at {config_path}: {e}")
-        if input("Use default config? (y/n): ").lower() == "y":
-            config = default_config
-        else:
-            sys.exit(1)
+        config = default_config
     finally:
         pass
 
@@ -93,10 +87,7 @@ if update_config:
         LOGS.log(f"Updated config at {config_path} with missing default values")
     except Exception as e:
         LOGS.error(f"Failed to update config at {config_path}: {e}")
-        if input("Use default config? (y/n): ").lower() == "y":
-            config = default_config
-        else:
-            sys.exit(1)
+        config = default_config
 
 class CameraInterface:
     def init_folder_struct(self):
