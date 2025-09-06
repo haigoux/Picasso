@@ -1,4 +1,5 @@
 from datetime import timedelta
+import shutil
 import signal
 import time
 from fastapi import FastAPI, Request
@@ -329,6 +330,9 @@ class CameraInterface:
             output_path
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) # TODO: add to log files l8r m8
         self._ffmpeg_pid = proc.pid
+    
+    def _move_thread(self, from_path, to_path):
+        shutil.move(from_path, to_path)
 
     def metadata_track_filemove(self, from_path, to_path):
         # move the file, wait for the to_path file size to be equal to from_path file size
@@ -339,7 +343,8 @@ class CameraInterface:
             "moved_bytes": 0,
         }
         try:
-            os.rename(from_path, to_path)
+            # shutil.move(from_path, to_path)
+            threading.Thread(target=self._move_thread, args=(from_path, to_path), daemon=True).start()
             self.logger.log(f"Moved recording to {to_path}")
         except Exception as e:
             self.logger.error(f"Failed to move recording to {to_path}: {e}")
