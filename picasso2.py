@@ -293,25 +293,35 @@ class CameraInterface:
 
     async def recv_frame(self):
         self.logger.log("Starting frame receiver")
-        with pyvirtualcam.Camera(width=int(config["resolution"].split("x")[0]), height=int(config["resolution"].split("x")[1]), fps=config["fps"], device=config["virtual_device"]["device"], print_fps=False) as vcam:
+        with pyvirtualcam.Camera(
+            width=int(config["resolution"].split("x")[0]),
+            height=int(config["resolution"].split("x")[1]),
+            fps=config["fps"],
+            device=config["virtual_device"]["device"],
+            print_fps=False
+        ) as vcam:
             while True:
                 ret, frame = self.cap.read()
-                if not ret:
+                if not ret or frame is None:
                     self.logger.error("Failed to read frame from camera")
-                    self._cur_frame = self._black_frame
-                else:
-                    self._cur_frame = frame
+                    frame = self._black_frame  # fallback
+                self._cur_frame = frame
                 await self.on_frame(frame, vcam)
-
     async def send_vframe(self, frame: np.ndarray, vcam: pyvirtualcam.Camera):
         vcam.send(frame)
         vcam.sleep_until_next_frame()
 
     async def on_frame(self, frame: np.ndarray, vcam: pyvirtualcam.Camera):
-        # first rescale just in case
-        frame = cv2.resize(frame, (int(config["resolution"].split("x")[0]), int(config["resolution"].split("x")[1])))
+        if frame is None or frame.size == 0:
+            self.logger.error("Received empty frame in on_frame")
+            frame = self._black_frame
+        frame = cv2.resize(frame, (
+            int(config["resolution"].split("x")[0]),
+            int(config["resolution"].split("x")[1])
+        ))
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         await self.send_vframe(frame, vcam)
+
 
     # OLD EXAMPLE
     # async def gen_frames(request: Request):
