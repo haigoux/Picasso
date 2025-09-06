@@ -53,7 +53,7 @@ default_config = {
     "virtual_device": {
         "name": "PicassoVirtCam",
         "device": "/dev/video40"
-    }
+    },
 }
 config = None
 
@@ -69,12 +69,7 @@ else:
             config = json.load(f)
     except json.JSONDecodeError:
         LOGS.error(f"Config file at {config_path} is not valid JSON")
-        config = default_config
-    except Exception as e:
-        LOGS.error(f"Error loading config file at {config_path}: {e}")
-        config = default_config
-    finally:
-        pass
+        sys.exit(1)
 
 update_config = False
 for key in default_config:
@@ -82,6 +77,15 @@ for key in default_config:
         LOGS.warn(f"Missing config option for: {key}, using default: {default_config[key]}")
         config[key] = default_config[key]
         update_config = True
+delkeys = []
+for key in config:
+    if key not in default_config:
+        LOGS.warn(f"Unknown config option found: {key}, removing it")
+        delkeys.append(key)
+        update_config = True
+for key in delkeys:
+    del config[key]
+
 if update_config:
     try:
         with open(config_path, "w") as f:
@@ -89,7 +93,7 @@ if update_config:
         LOGS.log(f"Updated config at {config_path} with missing default values")
     except Exception as e:
         LOGS.error(f"Failed to update config at {config_path}: {e}")
-        config = default_config
+        sys.exit(1)
 
 class CameraInterface:
     def init_folder_struct(self):
