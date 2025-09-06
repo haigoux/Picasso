@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite --host",
-    "build": "vite build",
+    "build": "vite build --outDir ./release",
     "preview": "vite preview"
   },
   "dependencies": {
