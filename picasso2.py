@@ -213,8 +213,6 @@ class CameraInterface:
             else:
                 # iterate through possible video devices
                 for i in range(0, 10):
-                    if i == 40:
-                        continue
                     device_path = f"/dev/video{i}"
                     if os.path.exists(device_path):
                         try:
@@ -223,8 +221,6 @@ class CameraInterface:
                                 test_cap.release()
                                 self.logger.log(f"Camera found at {device_path}, updating config")
                                 config["camera_device"] = device_path
-                                with open(config_path, "w") as f:
-                                    json.dump(config, f, indent=4)
                                 self.cap = cv2.VideoCapture(config["camera_device"])
                                 # set fps and resolution
                                 self.cap.set(cv2.CAP_PROP_FPS, config["fps"])
