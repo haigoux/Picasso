@@ -39,7 +39,7 @@
             </div>
         </div>
         <div class="viewfinder">
-            <div class="overlay">
+            <div class="overlay" v-if="metadata">
                 <div class="top">
                     <div class="recording-tag" v-if="metadata.recording">
                         <img src="@/assets/record_dot.png" />
@@ -55,13 +55,13 @@
                         </span>
                         <span>{{ (pic_size_bytes / 1024).toFixed(1) }} KB</span>
                     </div>
-                    <!-- <div class="recording-tag">
+                    <div class="recording-tag" v-if="!metadata.saving.complete">
                         <img src="@/assets/floppy.png" />
                         <span>
                             SAVING
                         </span>
-                        <span>5.4 MB</span>
-                    </div> -->
+                        <span>{{ (metadata.saving.total_bytes / (1024 * 1024)).toFixed(1) }} MB</span>
+                    </div>
                 </div>
                 <!-- <div class="center-right">
                     <div class="audio-meter">
@@ -111,7 +111,13 @@ export default {
     data() {
         return {
             stream_src: null,
-            metadata: {},
+            metadata: {
+                saving: {
+                    complete: true,
+                    total_bytes: 0,
+                    moved_bytes: 0,
+                }
+            },
             recording_length_str: '--:--:--',
             pic_size_bytes: 0,
             picture_taken: false,
@@ -177,30 +183,24 @@ export default {
             this.recording_length_str = new Date(seconds * 1000).toISOString().substr(11, 8);
         },
         startRecording() {
-            // fetch(`http://${window.location.hostname}:8000/start_recording`, {
-            //     headers: {
-            //         'X-Picasso-Passcode': this._header_x_picasso_passcode
-            //     }
-            // })
-            //     .then(response => response.json())
-            //     .then(data => {
-            //         this.metadata = data.metadata;
-            //     })
-            //     .catch(error => {
-            //         console.error('Error starting recording:', error);
-            //     });
             this.get(`http://${window.location.hostname}:8000/start_recording`, (data) => {
-                this.metadata = data.metadata;
             });
         },
         stopRecording() {
             this.get(`http://${window.location.hostname}:8000/stop_recording`, (data) => {
-                this.metadata = data.metadata;
             });
         },
         takePicture() {
             this.get(`http://${window.location.hostname}:8000/take_picture`, (data) => {
-                this.metadata = data.metadata;
+                this.picture_taken = true;
+                let size_bytes = 0;
+                if (data.size_bytes) {
+                    size_bytes = data.size_bytes;
+                }
+                this.pic_size_bytes = size_bytes;
+                setTimeout(() => {
+                    this.picture_taken = false;
+                }, 2000);
             });
         },
         getMetadata() {
@@ -229,14 +229,14 @@ export default {
         if (savedPasscode) {
             this._header_x_picasso_passcode = savedPasscode;
         }
+            this.getMetadata();
 
         setInterval(() => {
             this.getDurationString();
         }, 1000);
         setInterval(() => {
             this.getMetadata();
-            console.log(this.metadata);
-        }, 3000);
+        }, 500);
     }
 }
 </script>
