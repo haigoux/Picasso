@@ -151,6 +151,11 @@ class CameraInterface:
                 "total_bytes": 0,
                 "used_bytes": 0,
                 "free_bytes": 0
+            },
+            "saving": {
+                "complete": False,
+                "total_bytes": 0,
+                "moved_bytes": 0,
             }
         }
         self._failed_frame_count = 0
@@ -325,6 +330,35 @@ class CameraInterface:
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) # TODO: add to log files l8r m8
         self._ffmpeg_pid = proc.pid
 
+    def metadata_track_filemove(self, from_path, to_path):
+        # move the file, wait for the to_path file size to be equal to from_path file size
+        original_size = os.path.getsize(from_path)
+        self.metadata['saving'] = {
+            "complete": False,
+            "total_bytes": original_size,
+            "moved_bytes": 0,
+        }
+        try:
+            os.rename(from_path, to_path)
+            self.logger.log(f"Moved recording to {to_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to move recording to {to_path}: {e}")
+            return
+        # wait for the to_path file size to be equal to original_size
+        start_time = time.time()
+        while True:
+            if os.path.exists(to_path):
+                new_size = os.path.getsize(to_path)
+                if new_size == original_size:
+                    self.logger.log(f"File move complete: {to_path}")
+                    self.metadata['saving']['moved_bytes'] = new_size
+                    self.metadata['saving']['complete'] = True
+                    break
+                self.metadata['saving']['moved_bytes'] = new_size
+            # if time.time() - start_time > 30: # this is bad because some drives are slow
+            #     self.logger.error(f"File move timeout after 30 seconds: {to_path}")
+            #     break
+
     def stop_recording(self):
         self.metadata["recording"] = False
         self.logger.log("Stopped recording")
@@ -333,11 +367,7 @@ class CameraInterface:
         if self._temp_output_path and config["usb_mode"]:
             # move the temp file to the usb drive
             next_video_path = self.getNextVideoPath()
-            try:
-                os.rename(self._temp_output_path, next_video_path)
-                self.logger.log(f"Moved recording to {next_video_path}")
-            except Exception as e:
-                self.logger.error(f"Failed to move recording to {next_video_path}: {e}")
+            self.metadata_track_filemove(self._temp_output_path, next_video_path)
             self._temp_output_path = None
         
 
