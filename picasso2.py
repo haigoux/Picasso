@@ -154,7 +154,7 @@ class CameraInterface:
                 "free_bytes": 0
             },
             "saving": {
-                "complete": True,
+                "complete": False,
                 "total_bytes": 0,
                 "moved_bytes": 0,
             }
