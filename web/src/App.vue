@@ -8,7 +8,7 @@
         <input type="password" id="passcode" v-model="_passcode_input" />
         <button @click="enterPasscode(_passcode_input)">Submit</button>
     </div>
-    <div class="container">
+    <div class="container" v-if="authorized">
         <div class="controls">
             <!-- <div class="row">
                 <span class="status">
@@ -117,7 +117,7 @@ export default {
             picture_taken: false,
             storage_used_percent: 0,
             memory_used_percent: 0,
-            authorized: true,
+            authorized: false,
             _passcode_input: '',
             _header_x_picasso_passcode: '', // passcode for secure endpoints
         };
