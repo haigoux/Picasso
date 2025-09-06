@@ -80,10 +80,23 @@ else:
     finally:
         pass
 
+update_config = False
 for key in default_config:
     if key not in config:
         LOGS.warn(f"Missing config option for: {key}, using default: {default_config[key]}")
         config[key] = default_config[key]
+        update_config = True
+if update_config:
+    try:
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=4)
+        LOGS.log(f"Updated config at {config_path} with missing default values")
+    except Exception as e:
+        LOGS.error(f"Failed to update config at {config_path}: {e}")
+        if input("Use default config? (y/n): ").lower() == "y":
+            config = default_config
+        else:
+            sys.exit(1)
 
 class CameraInterface:
     def init_folder_struct(self):
@@ -143,16 +156,15 @@ class CameraInterface:
                 "free_bytes": 0
             }
         }
+        self._failed_frame_count = 0
         self._temp_output_path = None
         self._black_frame = np.zeros((int(config["resolution"].split("x")[1]), int(config["resolution"].split("x")[0]), 3), dtype=np.uint8)
+        # add text in the center
+        cv2.putText(self._black_frame, f"'{config['camera_device']}' Error", (int(config["resolution"].split("x")[0]) // 4, int(config["resolution"].split("x")[1]) // 2), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 5, cv2.LINE_AA)
         self._frame_buffer = []
         self._cur_frame = None
         self._ffmpeg_pid = None
         self.root = self.init_folder_struct()
-        # verify we can access the specified video device
-        if subprocess.run(["v4l2-ctl", "--device", config["camera_device"], "--all"], capture_output=True).returncode != 0:
-            self.logger.error(f"Cannot access camera device {config['camera_device']}")
-            sys.exit(1)
 
         if subprocess.call(["sudo", "modprobe", "-r", "v4l2loopback"]) != 0:
             self.logger.error("Failed to unload v4l2loopback module")
@@ -170,7 +182,7 @@ class CameraInterface:
             self.cap = cv2.VideoCapture(config["camera_device"]) 
         except Exception as e:
             self.logger.error(f"Failed to create video capture: {e}")
-            sys.exit(1)
+            self.wait_for_camera()
 
         try:
             # set fps and resolution
@@ -180,6 +192,51 @@ class CameraInterface:
         except Exception as e:
             self.logger.error(f"Failed to set video capture properties: {e}")
             sys.exit(1)
+
+    def wait_for_camera(self, delay=2):
+        # this is in the event the camera gets unplugged, we wait for it to come back
+        self.logger.log(f"Waiting for camera {config['camera_device']} to become available...")
+        # for some reason linux likes to change the device number when unplugging and replugging
+        # scan if opening config["camera_device"] does not work, start to 0 and dont use 40 its reserved for the virtual cam
+        while True:
+            if os.path.exists(config["camera_device"]):
+                try:
+                    test_cap = cv2.VideoCapture(config["camera_device"])
+                    if test_cap.isOpened():
+                        test_cap.release()
+                        self.logger.log(f"Camera {config['camera_device']} is now available")
+                        self.cap = cv2.VideoCapture(config["camera_device"])
+                        # set fps and resolution
+                        self.cap.set(cv2.CAP_PROP_FPS, config["fps"])
+                        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(config["resolution"].split("x")[0]))
+                        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(config["resolution"].split("x")[1]))
+                        return
+                except Exception as e:
+                    self.logger.error(f"Error accessing camera {config['camera_device']}: {e}")
+            else:
+                # iterate through possible video devices
+                for i in range(0, 10):
+                    if i == 40:
+                        continue
+                    device_path = f"/dev/video{i}"
+                    if os.path.exists(device_path):
+                        try:
+                            test_cap = cv2.VideoCapture(device_path)
+                            if test_cap.isOpened():
+                                test_cap.release()
+                                self.logger.log(f"Camera found at {device_path}, updating config")
+                                config["camera_device"] = device_path
+                                with open(config_path, "w") as f:
+                                    json.dump(config, f, indent=4)
+                                self.cap = cv2.VideoCapture(config["camera_device"])
+                                # set fps and resolution
+                                self.cap.set(cv2.CAP_PROP_FPS, config["fps"])
+                                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(config["resolution"].split("x")[0]))
+                                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(config["resolution"].split("x")[1]))
+                                return
+                        except Exception as e:
+                            self.logger.error(f"Error accessing camera {device_path}: {e}")
+            time.sleep(delay)
 
     def start(self):
         asyncio.run(self.recv_frame())
@@ -305,6 +362,13 @@ class CameraInterface:
                 if not ret or frame is None:
                     self.logger.error("Failed to read frame from camera")
                     frame = self._black_frame  # fallback
+                    self._failed_frame_count += 1
+                    if self._failed_frame_count >= 10:
+                        self.wait_for_camera()
+                        self._failed_frame_count = 0
+                        continue
+                else:
+                    self._failed_frame_count = 0
                 self._cur_frame = frame
                 await self.on_frame(frame, vcam)
     async def send_vframe(self, frame: np.ndarray, vcam: pyvirtualcam.Camera):
