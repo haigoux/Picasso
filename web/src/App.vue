@@ -26,14 +26,14 @@
                     <img class="small invert" src="@/assets/camera.png" />
                 </button>
             </div>
-            <div class="row">
+            <!-- <div class="row">
                 <button>
                     <img class="small" src="@/assets/save.png" />
                 </button>
                 <button>
                     <img class="small" src="@/assets/folder.png" />
                 </button>
-            </div>
+            </div> -->
             <div class="route">
                 <RouterView />
             </div>
@@ -143,6 +143,7 @@ export default {
                         throw new Error('Unauthorized');
                     }else if (response.status === 200) {
                         this.authorized = true;
+                        this.getStreamUrl();
                     }
                     if (!response.ok) {
                         throw new Error('Network response was not ok');
@@ -204,7 +205,8 @@ export default {
         },
         getMetadata() {
             this.get(`http://${window.location.hostname}:8000/metadata`, (data) => {
-                this.metadata = data;
+                this.metadata = data.metadata;
+                
                 if (this.metadata.storage_usage) {
                     this.storage_used_percent = (this.metadata.storage_usage.used_bytes / this.metadata.storage_usage.total_bytes) * 100;
                 }
@@ -228,13 +230,12 @@ export default {
             this._header_x_picasso_passcode = savedPasscode;
         }
 
-        this.getStreamUrl();
-        this.getMetadata();
         setInterval(() => {
             this.getDurationString();
         }, 1000);
         setInterval(() => {
             this.getMetadata();
+            console.log(this.metadata);
         }, 3000);
     }
 }
