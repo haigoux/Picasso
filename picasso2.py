@@ -357,7 +357,7 @@ class CameraInterface:
                 if new_size == original_size:
                     self.logger.log(f"File move complete: {to_path}")
                     self.metadata['saving']['moved_bytes'] = new_size
-                    self.metadata['saving']['complete'] = True
+                    self.metadata['saving']['complete'] = False
                     break
                 self.metadata['saving']['moved_bytes'] = new_size
             # if time.time() - start_time > 30: # this is bad because some drives are slow
