@@ -48,6 +48,8 @@ default_config = {
     "other_path": "~/",
     "preview_quality": 25, # preview quality
     "camera_device": "/dev/video0", # Default camera device
+    "passcode": "1234", # simple passcode to stop/start recording and take pictures
+    "secure": True, # if true, require passcode to stop/start recording and take pictures
     "virtual_device": {
         "name": "PicassoVirtCam",
         "device": "/dev/video40"
@@ -426,6 +428,17 @@ camera = CameraInterface()
 def run_camera():
     asyncio.run(camera.recv_frame())
 threading.Thread(target=run_camera, daemon=True).start()
+
+# add middleware to check for passcode in header for all routes
+@app.middleware("http")
+async def check_passcode(request: Request, call_next):
+    if config["secure"]:
+        if request.url.path in ["/start_recording", "/stop_recording", "/take_picture"]:
+            passcode = request.headers.get("X-Picasso-Passcode")
+            if passcode != config["passcode"]:
+                return JSONResponse(content={"error": "Unauthorized"}, status_code=401)
+    response = await call_next(request)
+    return response
 
 @app.get("/stream")
 async def stream(req: Request):
